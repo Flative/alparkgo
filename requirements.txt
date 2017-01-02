@@ -1,1 +1,2 @@
 slacker==0.9.30
+websocket-client==0.40.0
