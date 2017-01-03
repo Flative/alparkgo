@@ -79,7 +79,7 @@ class Alparkgo(object):
                                 'type': 'message',
                                 'channel': message.channel,
                                 'text': '<@{user}>, `{question}` 에 대한 답변입니다.\n'
-                                        '{answer}'.format(user=self.usernames[message.user],
+                                        '```{answer}```'.format(user=self.usernames[message.user],
                                                           question=message.text,
                                                           answer=message_dict['text'])
                             }
