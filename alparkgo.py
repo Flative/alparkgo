@@ -7,6 +7,13 @@ from slacker import Slacker
 import settings
 
 
+class Message(object):
+    def __init__(self, text, channel, user):
+        self.text = text
+        self.channel = channel
+        self.user = user
+
+
 class Alparkgo(object):
     def __init__(self, api_token):
         self.slack = Slacker(api_token)
@@ -54,7 +61,6 @@ class Alparkgo(object):
     def _on_close(self):
         def on_close(ws):
             self.slack.chat.post_message(settings.RECEIVER, 'Alparkgo가 꺼졌습니다.', as_user=True)
-
         return on_close
 
     def _on_open(self):
@@ -63,45 +69,55 @@ class Alparkgo(object):
                                          'Alparkgo가 켜졌습니다. '
                                          'Alparkgo에게 DM을 보내시면 메세지를 받은 순서대로 답장합니다.',
                                          as_user=True)
-
         return on_open
 
     def _on_message(self):
         def on_message(ws, ws_message):
-            message_dict = json.loads(ws_message)
-            if message_dict.get('type') == 'message':
-                if message_dict['user'] != self.bot_user_id:
-                    channel = message_dict['channel']
-                    if channel == self.receiver_channel_id:
-                        if not self.messages_queue.empty():
-                            message = self.messages_queue.get()
-                            response = {
-                                'type': 'message',
-                                'channel': message.channel,
-                                'text': '<@{user}>, `{question}` 에 대한 답변입니다.\n'
-                                        '```{answer}```'.format(user=self.usernames[message.user],
-                                                          question=message.text,
-                                                          answer=message_dict['text'])
-                            }
-                            ws.send(json.dumps(response))
-                    elif channel in self.dm_channels.values() \
-                            or self.bot_mention_string in message_dict['text']:
-                        message = Message(message_dict['text'],
-                                          message_dict['channel'],
-                                          message_dict['user'])
-                        self.messages_queue.put(message)
-                        alert_to_receiver = {
-                            'type': 'message',
-                            'channel': self.receiver_channel_id,
-                            'text': '새로운 메세지가 왔습니다.\n ```{message}```'.format(message=message.text)
-                        }
-                        ws.send(json.dumps(alert_to_receiver))
-
+            slack_message = json.loads(ws_message)
+            if slack_message.get('type') == 'message':
+                self._receive_message(ws, slack_message)
         return on_message
 
+    def _receive_message(self, ws, slack_message):
+        if self._is_not_alparkgo(slack_message['user']):
+            if self._is_message_from_receiver(slack_message):
+                self._response(ws, slack_message)
+            elif self._is_message_to_alparkgo(slack_message):
+                self._redirect_message_to_receiver(ws, slack_message)
 
-class Message(object):
-    def __init__(self, text, channel, user):
-        self.text = text
-        self.channel = channel
-        self.user = user
+    def _response(self, ws, slack_message):
+        if not self.messages_queue.empty():
+            message = self.messages_queue.get()
+            response = {
+                'type': 'message',
+                'channel': message.channel,
+                'text': '<@{user}>, `{question}` 에 대한 답변입니다.\n'
+                        '```{answer}```'.format(user=self.usernames[message.user],
+                                                question=message.text,
+                                                answer=slack_message['text'])
+            }
+            ws.send(json.dumps(response))
+
+    def _redirect_message_to_receiver(self, ws, slack_message):
+        message = Message(slack_message['text'],
+                          slack_message['channel'],
+                          slack_message['user'])
+        self.messages_queue.put(message)
+        alert_to_receiver = {
+            'type': 'message',
+            'channel': self.receiver_channel_id,
+            'text': '새로운 메세지가 왔습니다.\n ```{message}```'.format(message=message.text)
+        }
+        ws.send(json.dumps(alert_to_receiver))
+
+    def _is_not_alparkgo(self, user_id):
+        return user_id != self.bot_user_id
+
+    def _is_message_from_receiver(self, slack_message):
+        return slack_message['channel'] == self.receiver_channel_id
+
+    def _is_message_to_alparkgo(self, slack_message):
+        return slack_message['channel'] in self.dm_channels.values() \
+                    or self.bot_mention_string in slack_message['text']
+
+
